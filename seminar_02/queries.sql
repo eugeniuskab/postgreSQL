@@ -142,3 +142,131 @@ where not exists (
     and f2.product_category = 'Flour'
 )
 group by f1.region;
+
+-- Seminar 3 Task 1b
+-- Uloha 1
+with high_sales as (
+    select sale_date, sum(total_amount) as daily_sales
+    from flourmills_sales
+    group by sale_date
+)
+select *
+from high_sales
+where daily_sales > 3000000
+order by daily_sales desc;
+
+-- Uloha 2
+with category_sales as (
+    select product_category, sum(total_amount) as total_sales
+    from flourmills_sales
+    group by product_category
+)
+select *
+from category_sales
+order by total_sales desc;
+
+-- Uloha 3
+WITH product_sales AS (
+    SELECT 
+        product_category,
+        product_name,
+        SUM(total_amount) AS total_product_sales
+    FROM flourmills_sales
+    GROUP BY product_category, product_name
+),
+ranked_products AS (
+    SELECT 
+        product_category,
+        product_name,
+        total_product_sales,
+        RANK() OVER (
+            PARTITION BY product_category 
+            ORDER BY total_product_sales DESC
+        ) AS category_rank
+    FROM product_sales
+)
+SELECT 
+    product_category,
+    product_name,
+    total_product_sales,
+    category_rank
+FROM ranked_products
+WHERE category_rank <= 3
+ORDER BY product_category ASC, category_rank ASC
+LIMIT 10;
+
+-- Uloha 4
+with customer_type_sales as (
+    select customer_type, sum(total_amount) as revenue
+    from flourmills_sales
+    group by customer_type
+),
+sales_share as (
+    select customer_type, revenue, sum(revenue) over () as total_revenue, round((revenue / sum(revenue) over () * 100.0), 2) as revenue_percentage
+    from customer_type_sales
+)
+select customer_type, revenue, total_revenue, revenue_percentage
+from sales_share
+order by revenue desc;
+
+-- Uloha 5
+with customers_last_orders as(
+    select customer_id, product_name, sale_date, total_amount,
+    row_number() over (
+        partition by customer_id
+        order by sale_date desc
+    ) as rn
+    from flourmills_sales
+)
+select customer_id, product_name, sale_date, total_amount
+from customers_last_orders
+where rn = 1
+order by customer_id asc
+limit 5;
+
+-- Uloha 6
+with recursive date_bounds as (
+    select MIN(sale_date) as min_date, MAX(sale_date) as max_date
+    from flourmills_sales
+),
+calendar as (
+    select min_date as datum, max_date
+    from date_bounds
+
+    union all
+
+    select (datum + 1)::date, max_date
+    from calendar
+    where datum < max_date
+)
+select datum
+from calendar
+order by datum asc;
+
+
+-- Uloha 7
+with recursive monthly_revenue as (
+    select DATE_TRUNC('month', sale_date) as month, SUM(total_amount) as revenue
+    from flourmills_sales
+    group by DATE_TRUNC('month', sale_date)
+),
+ordered_months as (
+    select row_number() over (order by month) as rn, month, revenue
+    from monthly_revenue
+),
+cumulative_target as (
+    -- Anchor:
+    select rn, month, revenue, revenue as cumulative_revenue
+    from ordered_months
+    where rn = 1
+
+    union all
+
+    select om.rn, om.month, om.revenue, c.cumulative_revenue + om.revenue as cumulative_revenue
+    from cumulative_target c
+    join ordered_months om on om.rn = c.rn + 1
+    where c.cumulative_revenue < 500000000
+)
+select rn, month, revenue, cumulative_revenue
+from cumulative_target
+order by rn;
