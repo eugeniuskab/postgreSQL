@@ -1,4 +1,4 @@
--- Active: 1791897506187@@127.0.0.1@5432@retail@public
+-- Active: 1792049892529@@127.0.0.1@5432@superstore@public
 -- Uloha 1
 CREATE TABLE retail_sales (
     invoice_no VARCHAR(20),
@@ -172,3 +172,140 @@ select invoice_no, stock_code, description, quantity, unit_price, price_rank
 from ranked_prices
 where price_rank <= 5
 order by invoice_no asc, price_rank asc, stock_code asc;
+
+-- Task 1d
+-- Uloha 1
+with ranked_orders as(
+    select c.customer_name, o.order_id, o.order_date,
+    row_number() over (
+        partition by o.customer_id
+        order by o.order_date desc
+        ) as order_number
+from orders o
+join customers c on c.customer_id = o.customer_id
+)
+select customer_name, order_id, order_date
+from ranked_orders
+where order_number <= 2
+order by customer_name asc, order_number asc;
+
+-- Uloha 2
+with customer_regional_profit as (
+    select c.region, c.customer_name,
+        sum(o.profit) as total_profit
+    from orders o
+    join customers c on c.customer_id = o.customer_id
+    group by 
+        c.region, 
+        c.customer_name
+)
+select region, customer_name, total_profit,
+    rank() over (
+        partition by region 
+        order by total_profit desc
+    ) as rank_profit,
+    dense_rank() over (
+        partition by region 
+        order by total_profit desc
+    ) as dense_rank_profit
+from customer_regional_profit
+order by region asc, total_profit desc
+limit 5;
+
+-- Uloha 3
+with customer_sales as (
+    select c.customer_name,
+        sum(o.sales) as total_sales
+    from orders o
+    join customers c on c.customer_id = o.customer_id
+    group by c.customer_name
+)
+select customer_name, total_sales,
+    ntile(4) over (
+        order by total_sales desc
+    ) as quartile
+from customer_sales
+order by total_sales desc;
+
+-- Uloha 4
+with monthly_data as (
+    select 
+        date_trunc('month', order_date)::date as month,
+        sum(sales) as monthly_sales
+    from orders
+    group by date_trunc('month', order_date)
+)
+select month, monthly_sales,
+    lag(monthly_sales, 1) over (order by month asc) as prev_month_sales,
+    lead(monthly_sales, 1) over (order by month asc) as next_month_sales
+from monthly_data
+order by month asc;
+
+-- Uloha 5
+with product_totals as (
+    select p.category, p.product_name,
+    sum(o.sales) as product_sales
+    from orders o
+    join products p on o.product_id = p.product_id
+    group by p.category, p.product_name
+)
+select 
+    category,
+    product_name,
+    product_sales,
+    sum(product_sales) over (partition by category) as category_total,
+    round(
+        product_sales * 100.0 / sum(product_sales) over (partition by category),
+        2
+    ) as pct_of_category
+from product_totals
+order by category asc, product_sales desc;
+
+-- Uloha 6
+with customer_order_dates as (
+    select distinct c.customer_id, c.customer_name,
+        max(o.order_date) over (
+            partition by o.customer_id
+        ) as last_order_date,
+        max(o.order_date) over () as latest_order_date
+    from orders o
+    join customers c on c.customer_id = o.customer_id
+)
+select customer_id, customer_name, last_order_date
+from customer_order_dates
+where last_order_date < latest_order_date - interval '90 days'
+order by last_order_date asc;
+
+-- Uloha 7
+with monthly_sales as (
+    select date_trunc('month', order_date)::date as month,
+    sum(sales) as month_sales
+    from orders
+    group by date_trunc('month', order_date)
+),
+prev_monthly_sales as (
+    select month, month_sales,
+    lag(month_sales) over (order by month) as prev_month_sales
+    from monthly_sales
+)
+select month, month_sales, prev_month_sales,
+month_sales - prev_month_sales as sales_change,
+round((month_sales - prev_month_sales) * 100.0 / prev_month_sales, 2) as growth_percentage
+from prev_monthly_sales
+order by month asc;
+
+-- Uloha 8
+with customer_first_month as (
+    select customer_id, date_trunc('month', min(order_date))::date as first_month
+    from orders
+    group by customer_id
+    having date_trunc('month', min(order_date))::date = '2024-06-01'
+)
+select count(*) as returning_customers_count
+from customer_first_month cfm
+where exists (
+    select 1
+    from orders o
+    where o.customer_id = cfm.customer_id
+    and o.order_date >= '2024-07-01'
+);
